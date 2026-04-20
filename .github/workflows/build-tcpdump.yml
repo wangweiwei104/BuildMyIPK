@@ -17,7 +17,7 @@ jobs:
             gettext git libncurses-dev libssl-dev python3-distutils rsync unzip zlib1g-dev file wget
 
       - name: Clone iStoreOS 24.10.5 SDK
-        run: git clone --depth=1 https://github.com/istoreos/istoreos.git -b 24.10.5 istoreos
+        run: git clone --depth=1 https://github.com/istoreos/istoreos.git -b istoreos-24.10 istoreos
 
       - name: Add luci-app-tcpdump
         run: git clone https://github.com/KFERMercer/luci-app-tcpdump.git istoreos/package/luci-app-tcpdump
