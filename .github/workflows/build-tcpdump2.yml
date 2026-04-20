@@ -1,4 +1,4 @@
-name: Build luci-app-tcpdump IPK for N1 iStoreOS 24.10.5
+name: 2-Build luci-app-tcpdump for iStoreOS istoreos-24.10
 
 on:
   workflow_dispatch:
@@ -10,45 +10,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
+      - name: Free up space
         run: |
-          # 安装编译 istoreos 所需的基础依赖
-          sudo apt update
-          sudo apt install -y build-essential libncurses5-dev libncursesw5-dev \
-            zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip curl \
-            swig rsync python3 python3-pip libtool-bin cmake automake autoconf \
-            pkg-config libdeflate-dev  # 关键：安装 libdeflate 依赖
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt clean
 
-      - name: Clone istoreos source
+      - name: Install dependencies
         run: |
-          # 拉取对应版本的 istoreos 源码（确保版本匹配 24.10）
-          git clone --depth=1 https://github.com/istoreos/istoreos.git -b istoreos-24.10 istoreos
+          sudo apt update
+          sudo apt install -y build-essential libncurses-dev libssl-dev \
+            git gawk gettext xsltproc wget unzip zip python3 python3-pip \
+            libtool-bin cmake flex bison pkg-config libdeflate-dev
+
+      # 正确分支：istoreos-24.10
+      - name: Clone iStoreOS source
+        run: |
+          git clone --depth 1 -b istoreos-24.10 https://github.com/istoreos/istoreos.git
           cd istoreos
-          # 更新 feeds 并安装（确保依赖包完整）
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Prepare compile environment
+      - name: Config build env
         run: |
           cd istoreos
-          # 配置编译目标（N1 是 mips_24kc 架构）
-          cp configs/templates/istoreos-n1.config .config
-          # 启用 luci-app-tcpdump 编译
-          echo "CONFIG_PACKAGE_luci-app-tcpdump=y" >> .config
-          # 修复 libdeflate-gzip 软链接缺失问题
+          # N1 / arm64 正确架构配置
+          cat > .config << EOF
+          CONFIG_TARGET_armvirt=y
+          CONFIG_TARGET_armvirt_64=y
+          CONFIG_TARGET_armvirt_64_Default=y
+          CONFIG_PACKAGE_luci-app-tcpdump=y
+          EOF
+          make defconfig
+          # 修复 libdeflate-gzip 缺失
           mkdir -p staging_dir/host/bin
-          ln -s /usr/bin/gzip staging_dir/host/bin/libdeflate-gzip || true
+          ln -sf /usr/bin/gzip staging_dir/host/bin/libdeflate-gzip
 
-      - name: Build IPK
+      - name: Compile IPK
         run: |
           cd istoreos
-          # 先编译依赖的 lua 包（单独编译避免并行问题）
-          make package/utils/lua/compile V=s
-          # 再编译 luci-app-tcpdump
-          make package/luci-app-tcpdump/compile V=s -j$(nproc)
+          make package/luci-app-tcpdump/compile V=s -j1
 
       - name: Upload IPK
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-tcpdump-n1-ipk
-          path: istoreos/bin/packages/*/luci/luci-app-tcpdump*.ipk
+          name: luci-app-tcpdump-ipk
+          path: |
+            istoreos/bin/packages/aarch64_generic/luci/luci-app-tcpdump*.ipk
