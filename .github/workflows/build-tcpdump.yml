@@ -37,6 +37,16 @@ jobs:
           CONFIG_TARGET_armvirt_64_Default=y
           EOF
           make defconfig
+          
+      # +++ 新增的关键步骤：准备工具链和依赖包 +++
+      - name: Build toolchain and dependencies
+        run: |
+          cd istoreos
+          # 1. 编译并安装所有主机工具（host tools），这应该会构建出 libdeflate
+          make toolchain/install -j$(nproc) V=s
+          # 2. 编译并安装必要的 SDK 和基础包，确保 lua、libdeflate 等已就绪
+          make -j$(nproc) V=s
+        # 注意：此步骤可能耗时，但能解决大部分环境依赖问题。
 
       - name: Build IPK
         run: |
