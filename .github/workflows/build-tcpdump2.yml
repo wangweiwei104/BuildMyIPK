@@ -1,4 +1,4 @@
-name: 2-Build luci-app-tcpdump for iStoreOS istoreos-24.10
+name: 2-Build luci-app-tcpdump (KFERMercer) for iStoreOS 24.10
 
 on:
   workflow_dispatch:
@@ -10,47 +10,51 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # - name: Free up space
-      #   run: |
-      #     sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-      #     sudo apt clean
 
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential libncurses-dev libssl-dev \
-            git gawk gettext xsltproc wget unzip zip python3 python3-pip \
-            libtool-bin cmake flex bison pkg-config libdeflate-dev
+          sudo apt install -y build-essential libncurses-dev libssl-dev git gawk gettext \
+            xsltproc wget unzip zip python3 python3-pip libtool-bin cmake flex bison pkg-config libdeflate-dev
 
-      # 正确分支：istoreos-24.10
-      - name: Clone iStoreOS source
+      - name: Clone iStoreOS (istoreos-24.10 branch)
         run: |
           git clone --depth 1 -b istoreos-24.10 https://github.com/istoreos/istoreos.git
           cd istoreos
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Config build env
+      # 你指定的仓库：https://github.com/KFERMercer/luci-app-tcpdump
+      - name: Add luci-app-tcpdump (KFERMercer)
+        run: |
+          cd istoreos/package
+          git clone https://github.com/KFERMercer/luci-app-tcpdump.git
+
+      - name: Config and fix libdeflate-gzip
         run: |
           cd istoreos
-          # N1 / arm64 正确架构配置
+          # N1/arm64 配置
           cat > .config << EOF
           CONFIG_TARGET_armvirt=y
           CONFIG_TARGET_armvirt_64=y
           CONFIG_TARGET_armvirt_64_Default=y
           CONFIG_PACKAGE_luci-app-tcpdump=y
+          CONFIG_PACKAGE_tcpdump=y
+          CONFIG_PACKAGE_libpcap=y
           EOF
+
           make defconfig
-          # 修复 libdeflate-gzip 缺失
+
+          # 修复 libdeflate-gzip 不存在
           mkdir -p staging_dir/host/bin
           ln -sf /usr/bin/gzip staging_dir/host/bin/libdeflate-gzip
 
-      - name: Compile IPK
+      - name: Compile luci-app-tcpdump
         run: |
           cd istoreos
-          make package/luci-app-tcpdump/compile V=s -j1
+          make package/luci-app-tcpdump/compile V=s -j$(nproc)
 
-      - name: Upload IPK
+      - name: Upload IPK artifact
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-tcpdump-ipk
