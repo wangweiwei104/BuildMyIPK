@@ -35,6 +35,10 @@ jobs:
           CONFIG_TARGET_armvirt=y
           CONFIG_TARGET_armvirt_64=y
           CONFIG_TARGET_armvirt_64_Default=y
+          # 确保 luci-app-tcpdump 及其依赖被选中
+          CONFIG_PACKAGE_tcpdump=y
+          CONFIG_PACKAGE_luci-app-tcpdump=y
+          CONFIG_PACKAGE_luci-compat=y
           EOF
           make defconfig
           
@@ -52,6 +56,16 @@ jobs:
         run: |
           cd istoreos
           make package/luci-app-tcpdump/compile V=s -j$(nproc)
+
+      # +++ 新增：查找生成的IPK文件 +++
+      - name: Find and list IPK files
+        run: |
+          cd istoreos
+          echo "=== 查找所有IPK文件 ==="
+          find . -name "luci-app-tcpdump*.ipk" -type f 2>/dev/null || echo "未找到任何匹配的IPK文件"
+          echo ""
+          echo "=== 检查 bin/ 目录结构 ==="
+          ls -laR bin/ 2>/dev/null | head -50 || echo "bin/ 目录不存在"
 
       - name: Upload IPK
         uses: actions/upload-artifact@v4
