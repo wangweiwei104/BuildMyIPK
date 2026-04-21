@@ -5,7 +5,7 @@
 > 基于[KFERMercer/luci-app-tcpdump](https://github.com/KFERMercer/luci-app-tcpdump)
 > 运行在istoreos 24.10.5
 
-# =================以下是KFERMercer/luci-app-tcpdump原版的readme=============================
+# == 以下是KFERMercer/luci-app-tcpdump原版的readme ==
 
 # luci-app-tcpdump
 
