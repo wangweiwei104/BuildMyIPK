@@ -150,7 +150,7 @@ jobs:
         if: steps.find-ipk.outputs.ipk_found == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: "$files"
+          name: luci-app-tcpdump-istoreos2410-arm64-ipk.zip
           path: source/istoreos/${{ steps.find-ipk.outputs.first_file }}
           if-no-files-found: error
           retention-days: 7
