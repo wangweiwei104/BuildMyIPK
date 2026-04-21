@@ -2,73 +2,178 @@ name: Build luci-app-tcpdump IPK for N1 iStoreOS 24.10.5
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'istoreos/package/luci-app-tcpdump/**'
+      - '.github/workflows/build-tcpdump.yml'
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          path: source
 
-      - name: Init build env
+      - name: Setup Build Environment
         run: |
           sudo apt update
           sudo apt install -y build-essential clang flex bison gawk gcc-multilib g++-multilib \
             gettext git libncurses-dev libssl-dev python3-distutils rsync unzip zlib1g-dev file wget
 
       - name: Clone iStoreOS 24.10.5 SDK
-        run: git clone --depth=1 https://github.com/istoreos/istoreos.git -b istoreos-24.10 istoreos
-
-      - name: Add luci-app-tcpdump
-        run: git clone https://github.com/KFERMercer/luci-app-tcpdump.git istoreos/package/luci-app-tcpdump
-
-      - name: Update feeds
         run: |
-          cd istoreos
+          cd source
+          git clone --depth=1 https://github.com/istoreos/istoreos.git -b istoreos-24.10 istoreos
+
+      - name: Add luci-app-tcpdump package
+        run: |
+          cd source
+          git clone --depth=1 https://github.com/KFERMercer/luci-app-tcpdump.git istoreos/package/luci-app-tcpdump
+
+      - name: Update and Install Feeds
+        run: |
+          cd source/istoreos
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Set N1 target (arm64)
+      - name: Configure Target
         run: |
-          cd istoreos
+          cd source/istoreos
           cat > .config << EOF
           CONFIG_TARGET_armvirt=y
           CONFIG_TARGET_armvirt_64=y
           CONFIG_TARGET_armvirt_64_Default=y
-          # 确保 luci-app-tcpdump 及其依赖被选中
           CONFIG_PACKAGE_tcpdump=y
           CONFIG_PACKAGE_luci-app-tcpdump=y
           CONFIG_PACKAGE_luci-compat=y
           EOF
           make defconfig
           
-      # +++ 新增的关键步骤：准备工具链和依赖包 +++
-      - name: Build toolchain and dependencies
+      - name: Generate Cache Key
+        id: cache-key
         run: |
-          cd istoreos
-          # 1. 编译并安装所有主机工具（host tools），这应该会构建出 libdeflate
-          make toolchain/install -j$(nproc) V=s
-          # 2. 编译并安装必要的 SDK 和基础包，确保 lua、libdeflate 等已就绪
-          make -j$(nproc) V=s
-        # 注意：此步骤可能耗时，但能解决大部分环境依赖问题。
+          cd source/istoreos
+          # 计算配置和feeds的哈希值
+          HASH=$(find .config feeds.conf feeds/*.index -type f 2>/dev/null | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          
+      - name: Restore SDK Cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            source/istoreos/staging_dir/host
+            source/istoreos/staging_dir/toolchain-*
+            source/istoreos/build_dir/hostpkg
+            source/istoreos/dl
+          key: ubuntu-22.04-istoreos-sdk-${{ steps.cache-key.outputs.hash }}
+          restore-keys: |
+            ubuntu-22.04-istoreos-sdk-
 
-      - name: Build IPK
+      - name: Build Toolchain and Dependencies
+        if: steps.cache-restore.outputs.cache-hit != 'true'
         run: |
-          cd istoreos
-          make package/luci-app-tcpdump/compile V=s -j$(nproc)
+          cd source/istoreos
+          echo "Cache miss, building toolchain and dependencies..."
+          
+          # 先构建工具链
+          make toolchain/install -j$(($(nproc)+1))
+          
+          # 构建必要的宿主包
+          echo "Building host packages..."
+          for pkg in lua csstidy luci-base; do
+            if make -j1 package/$pkg/host/compile 2>/dev/null; then
+              echo "Host package $pkg built successfully"
+            fi
+          done
+          
+          # 构建目标包的基础依赖
+          echo "Building target dependencies..."
+          for pkg in tcpdump luci-base; do
+            if make -j1 package/$pkg/compile 2>/dev/null; then
+              echo "Target package $pkg built successfully"
+            fi
+          done
+          
+          echo "Toolchain and dependencies built successfully."
 
-      # +++ 新增：查找生成的IPK文件 +++
-      - name: Find and list IPK files
+      - name: Build luci-app-tcpdump IPK
         run: |
-          cd istoreos
-          echo "=== 查找所有IPK文件 ==="
-          find . -name "luci-app-tcpdump*.ipk" -type f 2>/dev/null || echo "未找到任何匹配的IPK文件"
-          echo ""
-          echo "=== 检查 bin/ 目录结构 ==="
-          ls -laR bin/ 2>/dev/null | head -50 || echo "bin/ 目录不存在"
+          cd source/istoreos
+          echo "Building luci-app-tcpdump package..."
+          make package/luci-app-tcpdump/compile V=s -j$(($(nproc)+1))
+          echo "Build completed."
 
-      - name: Upload IPK
+      - name: Save SDK Cache
+        if: steps.cache-restore.outputs.cache-hit != 'true' && !cancelled()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            source/istoreos/staging_dir/host
+            source/istoreos/staging_dir/toolchain-*
+            source/istoreos/build_dir/hostpkg
+            source/istoreos/dl
+          key: ubuntu-22.04-istoreos-sdk-${{ steps.cache-key.outputs.hash }}
+
+      - name: Locate Generated IPK
+        id: find-ipk
+        run: |
+          cd source/istoreos
+          
+          # 尝试多种可能的路径
+          IPK_PATHS=(
+            "bin/targets/*/*/packages/luci/luci-app-tcpdump*.ipk"
+            "bin/packages/*/luci/luci-app-tcpdump*.ipk"
+            "bin/packages/*/*/luci-app-tcpdump*.ipk"
+          )
+          
+          for pattern in "${IPK_PATHS[@]}"; do
+            # 使用 find 命令查找文件
+            files=$(find . -path "./$pattern" -type f 2>/dev/null | head -5)
+            if [ -n "$files" ]; then
+              echo "Found IPK files matching pattern '$pattern':"
+              echo "$files"
+              echo "first_file=$(echo "$files" | head -1 | sed 's|^\./||')" >> $GITHUB_OUTPUT
+              echo "ipk_found=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          done
+          
+          echo "Warning: No IPK files found. Listing build directories:"
+          find bin/ -type f -name "*.ipk" 2>/dev/null | head -20 || true
+          echo "ipk_found=false" >> $GITHUB_OUTPUT
+
+      - name: Upload IPK Artifact
+        if: steps.find-ipk.outputs.ipk_found == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-tcpdump-n1-ipk
-          path: istoreos/bin/packages/*/luci/luci-app-tcpdump*.ipk
+          path: source/istoreos/${{ steps.find-ipk.outputs.first_file }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Debug - Show Build Structure
+        if: always() && steps.find-ipk.outputs.ipk_found != 'true'
+        run: |
+          cd source/istoreos
+          echo "=== Directory structure ==="
+          ls -la bin/ 2>/dev/null || echo "bin/ directory not found"
+          echo ""
+          echo "=== All .ipk files ==="
+          find . -name "*.ipk" -type f 2>/dev/null || echo "No .ipk files found"
+          echo ""
+          echo "=== Config check ==="
+          grep "luci-app-tcpdump" .config 2>/dev/null || echo "luci-app-tcpdump not in .config"
+
+      - name: Upload Build Logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            source/istoreos/logs/
+            source/istoreos/.config
+          retention-days: 7
