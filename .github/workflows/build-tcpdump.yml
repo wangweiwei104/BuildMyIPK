@@ -28,10 +28,10 @@ jobs:
           cd source
           git clone --depth=1 https://github.com/istoreos/istoreos.git -b istoreos-24.10 istoreos
 
-      - name: Add luci-app-tcpdump package
+      - name: Add luci-app-tcpdump package by wangwei
         run: |
           cd source
-          git clone --depth=1 https://github.com/KFERMercer/luci-app-tcpdump.git istoreos/package/luci-app-tcpdump
+          git clone --depth=1 https://github.com/wangweiwei104/luci-app-tcpdump.git istoreos/package/luci-app-tcpdump
 
       - name: Update and Install Feeds
         run: |
